@@ -13,6 +13,14 @@ SEERR_API_KEY = os.getenv("SEERR_API_KEY", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w342"
 
+_missing = [name for name, val in [
+    ("SEERR_URL", SEERR_URL),
+    ("SEERR_API_KEY", SEERR_API_KEY),
+    ("TMDB_API_KEY", TMDB_API_KEY),
+] if not val]
+if _missing:
+    raise RuntimeError(f"Missing required environment variables: {', '.join(_missing)}")
+
 app = FastAPI(title="Seerr Manager")
 
 
