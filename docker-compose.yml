@@ -1,0 +1,14 @@
+services:
+  seerr-manager:
+    build: .
+    image: ${REGISTRY_IMAGE:-ghcr.io/vegardhw/seerr-manager}:${IMAGE_TAG:-latest}
+    platform: ${PLATFORM:-linux/amd64}
+    container_name: seerr-manager
+    ports:
+      - "8765:8765"
+    # Required — set these via a .env file or inline:
+    environment:
+      SEERR_URL: ${SEERR_URL}
+      SEERR_API_KEY: ${SEERR_API_KEY}
+      TMDB_API_KEY: ${TMDB_API_KEY}
+    restart: unless-stopped

@@ -1,0 +1,26 @@
+# Don't send git history or local tooling into the build context
+.git
+.gitignore
+
+# Node deps (installed inside the build stage, not needed from host)
+frontend/node_modules/
+
+# Build output already produced by a prior stage
+frontend/dist/
+backend/static/
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment / secrets
+.env
+.env.*
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+README.md
