@@ -12,6 +12,7 @@
     PROCESSING: '#3b82f6',
     PARTIALLY_AVAILABLE: '#8b5cf6',
     AVAILABLE: '#22c55e',
+    DELETED: '#ef4444',
   }
 
   $: mediaStatusColor = item ? (MEDIA_STATUS_COLOR[item.mediaStatusLabel] ?? '#64748b') : '#64748b'
