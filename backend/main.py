@@ -58,13 +58,12 @@ def is_flagged(item: dict) -> tuple[bool, list[str]]:
     reasons = []
 
     if not tmdb_id:
-        reasons.append("Missing TMDB ID")
-
-    if media_type == "tv" and tvdb_id and not tmdb_id:
-        reasons.append("TV request with only TVDB ID (Watchlist bug)")
-
-    if media_type == "movie" and tvdb_id and not tmdb_id:
-        reasons.append("Movie request with only TVDB ID")
+        if media_type == "tv" and tvdb_id:
+            reasons.append("TV request with only TVDB ID (Watchlist bug)")
+        elif media_type == "movie" and tvdb_id:
+            reasons.append("Movie request with only TVDB ID")
+        else:
+            reasons.append("Missing TMDB ID")
 
     media_status = media.get("status")
     if media_status == 7:
@@ -184,13 +183,10 @@ def make_orphan_item(media: dict) -> dict:
 async def get_requests():
     async with httpx.AsyncClient(timeout=60) as client:
         # Fetch all requests and all media concurrently
-        requests_task = asyncio.create_task(
-            fetch_all_pages(client, "/api/v1/request", {"sort": "added"})
+        all_requests, all_media = await asyncio.gather(
+            fetch_all_pages(client, "/api/v1/request", {"sort": "added"}),
+            fetch_all_pages(client, "/api/v1/media"),
         )
-        media_task = asyncio.create_task(
-            fetch_all_pages(client, "/api/v1/media")
-        )
-        all_requests, all_media = await asyncio.gather(requests_task, media_task)
 
         # Find media that is DELETED and has no active request
         requested_media_ids = {r["media"]["id"] for r in all_requests}
@@ -229,19 +225,21 @@ async def _do_rerequest(client: httpx.AsyncClient, request_id: int) -> dict:
             detail=f"Request {request_id} has no TMDB ID — resolve the ID mismatch first",
         )
 
-    await client.delete(
+    del_req = await client.delete(
         f"{SEERR_URL}/api/v1/request/{request_id}",
         headers=seerr_headers(),
     )
+    del_req.raise_for_status()
 
     # Clear Seerr's cached media record so the new request gets a clean TMDB
     # lookup instead of re-attaching to the stale (possibly mismatched) record.
     media_internal_id = media.get("id")
     if media_internal_id:
-        await client.delete(
+        del_media = await client.delete(
             f"{SEERR_URL}/api/v1/media/{media_internal_id}",
             headers=seerr_headers(),
         )
+        del_media.raise_for_status()
 
     payload: dict = {"mediaType": media_type, "mediaId": tmdb_id}
     if media_type == "tv" and seasons:
@@ -263,10 +261,11 @@ async def _do_request_orphan(client: httpx.AsyncClient, seerr_media_id: int, tmd
     if not tmdb_id:
         raise HTTPException(status_code=422, detail="No TMDB ID available for this media item")
 
-    await client.delete(
+    del_media = await client.delete(
         f"{SEERR_URL}/api/v1/media/{seerr_media_id}",
         headers=seerr_headers(),
     )
+    del_media.raise_for_status()
 
     new_resp = await client.post(
         f"{SEERR_URL}/api/v1/request",

@@ -63,7 +63,7 @@
       aria-checked={selected}
       tabindex="0"
       on:click={handleCheck}
-      on:keydown={(e) => e.key === ' ' && handleCheck(e)}
+      on:keydown={(e) => { if (e.key === ' ') { e.preventDefault(); handleCheck(e) } }}
     >
       <span class="card__checkmark" class:card__checkmark--checked={selected}></span>
     </div>
