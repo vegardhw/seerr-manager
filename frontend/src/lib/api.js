@@ -15,6 +15,7 @@ async function request(url, options = {}) {
 }
 
 export const api = {
+  // ── Requests view ─────────────────────────────────────────────────────────
   fetchRequests: () => request('/api/requests'),
   fetchStatus: () => request('/api/status'),
 
@@ -31,4 +32,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ids, orphans }),
     }),
+
+  // ── Watchlist comparison ───────────────────────────────────────────────────
+  fetchWatchlistComparison: () => request('/api/watchlist/comparison'),
+
+  /** items: Array<{ tmdbId: number, mediaType: 'movie' | 'tv' }> */
+  requestWatchlistItems: (items) =>
+    request('/api/watchlist/request', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+
+  // ── Cache management ───────────────────────────────────────────────────────
+  getCacheStatus: () => request('/api/cache/status'),
+  clearCache: () => request('/api/cache', { method: 'DELETE' }),
 }

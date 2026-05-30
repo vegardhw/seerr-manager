@@ -29,22 +29,22 @@
 <style>
   .grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.625rem;
-    padding: 0.75rem;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    padding: 0.625rem;
   }
 
   @media (min-width: 540px) {
-    .grid { grid-template-columns: repeat(3, 1fr); }
+    .grid { grid-template-columns: repeat(4, 1fr); }
   }
   @media (min-width: 768px) {
-    .grid { grid-template-columns: repeat(4, 1fr); gap: 0.875rem; padding: 1rem; }
+    .grid { grid-template-columns: repeat(5, 1fr); gap: 0.75rem; padding: 0.875rem; }
   }
   @media (min-width: 1200px) {
-    .grid { grid-template-columns: repeat(5, 1fr); }
+    .grid { grid-template-columns: repeat(6, 1fr); }
   }
   @media (min-width: 1600px) {
-    .grid { grid-template-columns: repeat(6, 1fr); }
+    .grid { grid-template-columns: repeat(7, 1fr); }
   }
 
   .empty {
