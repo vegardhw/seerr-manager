@@ -10,6 +10,7 @@
   export let filteredCount = 0
   export let selectedCount = 0
   export let rerequesting = false
+  export let resetting = false
   export let refreshing = false
   export let availableMediaStatuses = []
   export let cacheInfo = null            // { ttl_seconds, entries } | null
@@ -140,8 +141,16 @@
           Select all visible
         </button>
         <button
+          class="btn btn--danger"
+          disabled={resetting || rerequesting}
+          title="Delete the request and media record from Seerr without re-requesting"
+          on:click={() => dispatch('resetSelected')}
+        >
+          {resetting ? '⟳ Working…' : `Reset ${selectedCount}`}
+        </button>
+        <button
           class="btn btn--primary"
-          disabled={rerequesting}
+          disabled={rerequesting || resetting}
           on:click={() => dispatch('rerequestSelected')}
         >
           {rerequesting ? '⟳ Working…' : `Re-request ${selectedCount}`}
@@ -333,4 +342,7 @@
   .btn--primary { background: #6366f1; color: #fff; }
   .btn--primary:hover:not(:disabled) { background: #4f46e5; }
   .btn--primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn--danger { background: #450a0a; color: #fca5a5; border: 1px solid #7f1d1d; }
+  .btn--danger:hover:not(:disabled) { background: #7f1d1d; color: #fecaca; }
+  .btn--danger:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

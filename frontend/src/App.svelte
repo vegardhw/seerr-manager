@@ -60,6 +60,8 @@
 
   let rerequestingKeys = new Set()
   let rerequestingBatch = false
+  let resettingKeys = new Set()
+  let resettingBatch = false
 
   // ── Cache info ───────────────────────────────────────────────────────────
   let cacheInfo = null
@@ -147,6 +149,75 @@
 
   function clearSelection() {
     selected = new Set()
+  }
+
+  // ── Reset single ──────────────────────────────────────────────────────────
+  async function doReset(item) {
+    const key = item._key
+    resettingKeys = new Set([...resettingKeys, key])
+    const tid = toastRef.addToast('Resetting…', 'loading', 0)
+    try {
+      if (item.orphan) {
+        await api.resetOrphan(item.media.id)
+      } else {
+        await api.reset(item.id)
+      }
+      toastRef.removeToast(tid)
+      toastRef.addToast('Item reset — request and media record removed.', 'success')
+      const next = new Set(selected)
+      next.delete(key)
+      selected = next
+      if (activeItem?._key === key) activeItem = null
+      await load()
+    } catch (e) {
+      toastRef.removeToast(tid)
+      toastRef.addToast(`Reset failed: ${e.message}`, 'error')
+    } finally {
+      const next = new Set(resettingKeys)
+      next.delete(key)
+      resettingKeys = next
+    }
+  }
+
+  // ── Reset batch ────────────────────────────────────────────────────────────
+  async function doResetBatch() {
+    const keys = [...selectedInView]
+    if (!keys.length) return
+
+    const selectedItems = filtered.filter((r) => keys.includes(r._key))
+    const regularItems = selectedItems.filter((r) => !r.orphan)
+    const orphanItems = selectedItems.filter((r) => r.orphan)
+
+    const total = selectedItems.length
+    const confirmed = confirm(
+      `Reset ${total} selected item${total === 1 ? '' : 's'}?\n\nThis will permanently delete the request and media record from Seerr. No new request will be created.`
+    )
+    if (!confirmed) return
+
+    resettingBatch = true
+    const tid = toastRef.addToast(`Resetting ${total} items…`, 'loading', 0)
+    try {
+      const result = await api.resetBatch(
+        regularItems.map((r) => r.id),
+        orphanItems.map((r) => r.media.id)
+      )
+      toastRef.removeToast(tid)
+      const ok = result.results?.length ?? 0
+      const fail = result.errors?.length ?? 0
+      if (fail === 0) {
+        toastRef.addToast(`${ok} item${ok === 1 ? '' : 's'} reset successfully.`, 'success')
+      } else {
+        toastRef.addToast(`${ok} succeeded, ${fail} failed. Check console for details.`, 'error')
+        console.error('Batch reset errors:', result.errors)
+      }
+      clearSelection()
+      await load()
+    } catch (e) {
+      toastRef.removeToast(tid)
+      toastRef.addToast(`Batch reset failed: ${e.message}`, 'error')
+    } finally {
+      resettingBatch = false
+    }
   }
 
   // ── Re-request single ─────────────────────────────────────────────────────
@@ -262,6 +333,7 @@
     filteredCount={filtered.length}
     selectedCount={selectedInView.size}
     rerequesting={rerequestingBatch}
+    resetting={resettingBatch}
     refreshing={loading}
     on:viewChange={handleViewChange}
     on:filterChange={(e) => { filter = e.detail; selected = new Set() }}
@@ -271,6 +343,7 @@
     on:selectAll={selectAll}
     on:clearSelection={clearSelection}
     on:rerequestSelected={doRerequestBatch}
+    on:resetSelected={doResetBatch}
     on:refresh={handleRefresh}
   />
 
@@ -306,8 +379,10 @@
   <DetailDrawer
     item={activeItem}
     rerequesting={activeItem ? rerequestingKeys.has(activeItem._key) : false}
+    resetting={activeItem ? resettingKeys.has(activeItem._key) : false}
     on:close={() => (activeItem = null)}
     on:rerequest={(e) => doRerequest(e.detail)}
+    on:reset={(e) => doReset(e.detail)}
   />
 
   <Toast bind:this={toastRef} />

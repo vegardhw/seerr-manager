@@ -58,6 +58,20 @@ export const api = {
       body: JSON.stringify({ ids, orphans }),
     }),
 
+  reset: (id) => request(`/api/reset/${id}`, { method: 'POST' }),
+
+  resetOrphan: (seerrMediaId) =>
+    request('/api/reset/orphan', {
+      method: 'POST',
+      body: JSON.stringify({ seerrMediaId }),
+    }),
+
+  resetBatch: (ids, orphanMediaIds) =>
+    request('/api/reset/batch', {
+      method: 'POST',
+      body: JSON.stringify({ ids, orphanMediaIds }),
+    }),
+
   // ── Watchlist comparison ───────────────────────────────────────────────────
   fetchWatchlistComparison: () => request('/api/watchlist/comparison'),
 
