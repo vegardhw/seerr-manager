@@ -582,6 +582,15 @@ class BatchBody(BaseModel):
     orphans: list[BatchOrphan] = []
 
 
+class ResetOrphanBody(BaseModel):
+    seerrMediaId: int
+
+
+class BatchResetBody(BaseModel):
+    ids: list[int] = []
+    orphanMediaIds: list[int] = []
+
+
 class WatchlistItem(BaseModel):
     tmdbId: int
     mediaType: MediaType
@@ -589,6 +598,46 @@ class WatchlistItem(BaseModel):
 
 class WatchlistRequestBody(BaseModel):
     items: list[WatchlistItem]
+
+
+# ---------------------------------------------------------------------------
+# Reset helpers  (delete request + media record, no new request submitted)
+# ---------------------------------------------------------------------------
+
+async def _do_reset(client: httpx.AsyncClient, request_id: int) -> None:
+    """Delete a request and its associated media record without re-requesting."""
+    resp = await client.get(
+        f"{SEERR_URL}/api/v1/request/{request_id}",
+        headers=seerr_headers(),
+    )
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
+    resp.raise_for_status()
+    req_data = resp.json()
+    media = req_data.get("media", {})
+
+    del_req = await client.delete(
+        f"{SEERR_URL}/api/v1/request/{request_id}",
+        headers=seerr_headers(),
+    )
+    del_req.raise_for_status()
+
+    media_internal_id = media.get("id")
+    if media_internal_id:
+        del_media = await client.delete(
+            f"{SEERR_URL}/api/v1/media/{media_internal_id}",
+            headers=seerr_headers(),
+        )
+        del_media.raise_for_status()
+
+
+async def _do_reset_orphan(client: httpx.AsyncClient, seerr_media_id: int) -> None:
+    """Delete just the media record for an orphan (no request to remove)."""
+    del_media = await client.delete(
+        f"{SEERR_URL}/api/v1/media/{seerr_media_id}",
+        headers=seerr_headers(),
+    )
+    del_media.raise_for_status()
 
 
 # ---------------------------------------------------------------------------
@@ -646,6 +695,59 @@ async def rerequest_single(request_id: int, _: None = Depends(require_auth)):
         new_req = await _do_rerequest(client, request_id)
     await cache_invalidate("requests", "watchlist_comparison")
     return {"success": True, "newRequest": new_req}
+
+
+# ---------------------------------------------------------------------------
+# Endpoints — Reset actions  (purge without re-requesting)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/reset/batch")
+async def reset_batch(body: BatchResetBody, _: None = Depends(require_auth)):
+    _require_credentials()
+    results = []
+    errors = []
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        for request_id in body.ids:
+            try:
+                await _do_reset(client, request_id)
+                results.append({"id": request_id, "success": True})
+            except HTTPException as exc:
+                errors.append({"id": request_id, "error": exc.detail})
+            except Exception as exc:
+                logger.error("Unexpected error resetting id=%s: %s", request_id, exc)
+                errors.append({"id": request_id, "error": "Internal error"})
+
+        for media_id in body.orphanMediaIds:
+            try:
+                await _do_reset_orphan(client, media_id)
+                results.append({"seerrMediaId": media_id, "success": True})
+            except HTTPException as exc:
+                errors.append({"seerrMediaId": media_id, "error": exc.detail})
+            except Exception as exc:
+                logger.error("Unexpected error resetting orphan mediaId=%s: %s", media_id, exc)
+                errors.append({"seerrMediaId": media_id, "error": "Internal error"})
+
+    await cache_invalidate("requests", "watchlist_comparison")
+    return {"results": results, "errors": errors}
+
+
+@app.post("/api/reset/orphan")
+async def reset_orphan(body: ResetOrphanBody, _: None = Depends(require_auth)):
+    _require_credentials()
+    async with httpx.AsyncClient(timeout=30) as client:
+        await _do_reset_orphan(client, body.seerrMediaId)
+    await cache_invalidate("requests", "watchlist_comparison")
+    return {"success": True}
+
+
+@app.post("/api/reset/{request_id}")
+async def reset_single(request_id: int, _: None = Depends(require_auth)):
+    _require_credentials()
+    async with httpx.AsyncClient(timeout=30) as client:
+        await _do_reset(client, request_id)
+    await cache_invalidate("requests", "watchlist_comparison")
+    return {"success": True}
 
 
 # ---------------------------------------------------------------------------

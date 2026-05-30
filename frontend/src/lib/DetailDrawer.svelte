@@ -3,6 +3,7 @@
 
   export let item = null
   export let rerequesting = false
+  export let resetting = false
 
   const dispatch = createEventDispatcher()
 
@@ -153,9 +154,19 @@
         <button class="btn btn--ghost" on:click={() => dispatch('close')}>
           Close
         </button>
+        {#if item.mediaStatusLabel === 'DELETED'}
+          <button
+            class="btn btn--danger"
+            disabled={resetting || rerequesting}
+            title="Remove the request and media record from Seerr without re-requesting"
+            on:click={() => dispatch('reset', item)}
+          >
+            {resetting ? '⟳ Working…' : '🗑 Reset'}
+          </button>
+        {/if}
         <button
           class="btn btn--primary"
-          disabled={rerequesting || !item.media?.tmdbId}
+          disabled={rerequesting || resetting || !item.media?.tmdbId}
           title={!item.media?.tmdbId ? 'No TMDB ID available' : ''}
           on:click={() => dispatch('rerequest', item)}
         >
@@ -368,4 +379,7 @@
   .btn--primary { background: #6366f1; color: #fff; }
   .btn--primary:hover:not(:disabled) { background: #4f46e5; }
   .btn--primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn--danger { background: #7f1d1d; color: #fca5a5; border: 1px solid #991b1b; }
+  .btn--danger:hover:not(:disabled) { background: #991b1b; color: #fecaca; }
+  .btn--danger:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
