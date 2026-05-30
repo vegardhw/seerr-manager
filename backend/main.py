@@ -1,18 +1,43 @@
 import asyncio
+import hmac
+import logging
 import os
 import time
+import warnings
 from datetime import datetime, timezone
 from typing import Literal
+from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+)
+logger = logging.getLogger("seerr_manager")
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
 SEERR_URL = os.getenv("SEERR_URL", "").rstrip("/")
 SEERR_API_KEY = os.getenv("SEERR_API_KEY", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w342"
+
+# Optional shared secret — if set, all /api/* routes require:
+#   Authorization: Bearer <APP_SECRET>
+# Strongly recommended for any deployment reachable beyond localhost.
+APP_SECRET = os.getenv("APP_SECRET", "")
 
 # TMDB auth: v3 keys are short hex strings; v4 read-access tokens are JWTs
 # (start with "eyJ"). The v3 endpoint accepts both, but JWTs must be sent
@@ -23,16 +48,27 @@ _TMDB_IS_BEARER = TMDB_API_KEY.startswith("eyJ")
 # Set to 0 to disable caching (always re-fetch from Seerr/TMDB).
 CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", "300"))
 
+# ---------------------------------------------------------------------------
+# Startup validation
+# ---------------------------------------------------------------------------
+
 _missing = [name for name, val in [
     ("SEERR_URL", SEERR_URL),
     ("SEERR_API_KEY", SEERR_API_KEY),
     ("TMDB_API_KEY", TMDB_API_KEY),
 ] if not val]
 
+# Validate SEERR_URL is a proper http(s) URL (guards against SSRF via env injection).
+if SEERR_URL:
+    _parsed = urlparse(SEERR_URL)
+    if _parsed.scheme not in ("http", "https") or not _parsed.netloc:
+        raise RuntimeError(
+            f"SEERR_URL must be a valid http(s) URL, got: {SEERR_URL!r}"
+        )
+
 # In dev mode (no creds yet) we warn rather than crash so the frontend can
 # still boot and be inspected.  Every API endpoint guards itself.
 if _missing:
-    import warnings
     warnings.warn(
         f"Missing required environment variables: {', '.join(_missing)}. "
         "API endpoints will return 503 until all variables are set.",
@@ -40,7 +76,47 @@ if _missing:
         stacklevel=1,
     )
 
+if not APP_SECRET:
+    warnings.warn(
+        "APP_SECRET is not set. The /api/* endpoints are unprotected. "
+        "Set APP_SECRET to a strong random string to enable bearer-token auth.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+
+# ---------------------------------------------------------------------------
+# FastAPI app + middleware
+# ---------------------------------------------------------------------------
+
 app = FastAPI(title="Seerr Manager")
+
+# CORS: deny cross-origin requests by default.
+# Set CORS_ORIGINS env var to a comma-separated list of allowed origins
+# (e.g. "http://localhost:5173") only if you need cross-origin access.
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+# ---------------------------------------------------------------------------
+# Authentication dependency
+# ---------------------------------------------------------------------------
+
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+async def require_auth(
+    creds: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
+):
+    """Require a valid Bearer token when APP_SECRET is configured."""
+    if not APP_SECRET:
+        return  # auth disabled — open deployment
+    if creds is None or not hmac.compare_digest(creds.credentials, APP_SECRET):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +128,7 @@ def _require_credentials():
     if _missing:
         raise HTTPException(
             status_code=503,
-            detail=f"Server not configured — missing: {', '.join(_missing)}",
+            detail="Server not configured — one or more required environment variables are missing.",
         )
 
 
@@ -379,7 +455,7 @@ def make_orphan_item(media: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 @app.get("/api/requests")
-async def get_requests():
+async def get_requests(_: None = Depends(require_auth)):
     _require_credentials()
     cached = await cache_get("requests")
     if cached is not None:
@@ -520,7 +596,7 @@ class WatchlistRequestBody(BaseModel):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/rerequest/batch")
-async def rerequest_batch(body: BatchBody):
+async def rerequest_batch(body: BatchBody, _: None = Depends(require_auth)):
     _require_credentials()
     results = []
     errors = []
@@ -533,7 +609,8 @@ async def rerequest_batch(body: BatchBody):
             except HTTPException as exc:
                 errors.append({"id": request_id, "error": exc.detail})
             except Exception as exc:
-                errors.append({"id": request_id, "error": str(exc)})
+                logger.error("Unexpected error re-requesting id=%s: %s", request_id, exc)
+                errors.append({"id": request_id, "error": "Internal error"})
 
         for orphan in body.orphans:
             try:
@@ -544,14 +621,15 @@ async def rerequest_batch(body: BatchBody):
             except HTTPException as exc:
                 errors.append({"seerrMediaId": orphan.seerrMediaId, "error": exc.detail})
             except Exception as exc:
-                errors.append({"seerrMediaId": orphan.seerrMediaId, "error": str(exc)})
+                logger.error("Unexpected error re-requesting orphan mediaId=%s: %s", orphan.seerrMediaId, exc)
+                errors.append({"seerrMediaId": orphan.seerrMediaId, "error": "Internal error"})
 
     await cache_invalidate("requests", "watchlist_comparison")
     return {"results": results, "errors": errors}
 
 
 @app.post("/api/rerequest/orphan")
-async def rerequest_orphan(body: OrphanBody):
+async def rerequest_orphan(body: OrphanBody, _: None = Depends(require_auth)):
     _require_credentials()
     async with httpx.AsyncClient(timeout=30) as client:
         new_req = await _do_request_orphan(
@@ -562,7 +640,7 @@ async def rerequest_orphan(body: OrphanBody):
 
 
 @app.post("/api/rerequest/{request_id}")
-async def rerequest_single(request_id: int):
+async def rerequest_single(request_id: int, _: None = Depends(require_auth)):
     _require_credentials()
     async with httpx.AsyncClient(timeout=30) as client:
         new_req = await _do_rerequest(client, request_id)
@@ -575,7 +653,7 @@ async def rerequest_single(request_id: int):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/watchlist/comparison")
-async def get_watchlist_comparison():
+async def get_watchlist_comparison(_: None = Depends(require_auth)):
     _require_credentials()
     cached = await cache_get("watchlist_comparison")
     if cached is not None:
@@ -592,7 +670,8 @@ async def get_watchlist_comparison():
             me = me_resp.json()
             user_id = me["id"]
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Cannot identify Seerr user: {exc}")
+            logger.error("Cannot identify Seerr user: %s", exc)
+            raise HTTPException(status_code=502, detail="Cannot reach Seerr — check SEERR_URL and SEERR_API_KEY.")
 
         # Parallel fetch: watchlist, all requests, all media
         try:
@@ -602,7 +681,8 @@ async def get_watchlist_comparison():
                 fetch_all_pages(client, "/api/v1/media"),
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Failed to fetch data from Seerr: {exc}")
+            logger.error("Failed to fetch data from Seerr: %s", exc)
+            raise HTTPException(status_code=502, detail="Failed to fetch data from Seerr.")
 
         # Build TMDB ID lookup maps
         requests_by_tmdb: dict[int, list] = {}
@@ -686,7 +766,7 @@ async def get_watchlist_comparison():
 
 
 @app.post("/api/watchlist/request")
-async def request_watchlist_items(body: WatchlistRequestBody):
+async def request_watchlist_items(body: WatchlistRequestBody, _: None = Depends(require_auth)):
     _require_credentials()
     results = []
     errors = []
@@ -703,7 +783,8 @@ async def request_watchlist_items(body: WatchlistRequestBody):
                 resp.raise_for_status()
                 return {"tmdbId": item.tmdbId, "success": True, "newId": resp.json().get("id")}
             except Exception as exc:
-                return {"tmdbId": item.tmdbId, "success": False, "error": str(exc)}
+                logger.error("Failed to submit watchlist request tmdbId=%s: %s", item.tmdbId, exc)
+                return {"tmdbId": item.tmdbId, "success": False, "error": "Failed to submit request"}
 
         item_results = await asyncio.gather(*[_submit(item) for item in body.items])
 
@@ -719,7 +800,7 @@ async def request_watchlist_items(body: WatchlistRequestBody):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/cache/status")
-async def get_cache_status():
+async def get_cache_status(_: None = Depends(require_auth)):
     now = time.monotonic()
     async with _cache_lock:
         return {
@@ -732,7 +813,7 @@ async def get_cache_status():
 
 
 @app.delete("/api/cache")
-async def clear_cache():
+async def clear_cache(_: None = Depends(require_auth)):
     """Flush the entire server-side cache, forcing a full re-fetch on next request."""
     await cache_invalidate()
     return {"ok": True, "message": "Cache cleared"}
@@ -742,8 +823,15 @@ async def clear_cache():
 # Endpoints — Health / status
 # ---------------------------------------------------------------------------
 
+
+@app.get("/api/auth-required")
+async def auth_required():
+    """Public endpoint: tells the frontend whether a Bearer token is needed."""
+    return {"required": bool(APP_SECRET)}
+
+
 @app.get("/api/status")
-async def get_status():
+async def get_status(_: None = Depends(require_auth)):
     seerr_ok = False
     seerr_version = None
     tmdb_ok = False
@@ -774,7 +862,6 @@ async def get_status():
 
     return {
         "configured": configured,
-        "missing": _missing,
         "seerr": {"ok": seerr_ok, "version": seerr_version},
         "tmdb": {"ok": tmdb_ok},
     }

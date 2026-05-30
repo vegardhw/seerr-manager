@@ -1,11 +1,47 @@
 <script>
   import { onMount } from 'svelte'
-  import { api } from './lib/api.js'
+  import { api, AuthError, getToken, setToken } from './lib/api.js'
   import FilterBar from './lib/FilterBar.svelte'
   import CardGrid from './lib/CardGrid.svelte'
   import DetailDrawer from './lib/DetailDrawer.svelte'
   import WatchlistView from './lib/WatchlistView.svelte'
   import Toast from './lib/Toast.svelte'
+
+  // ── Auth state ───────────────────────────────────────────────────────────
+  let authRequired = false
+  let authChecked = false
+  let tokenInput = getToken()
+  let authError = ''
+
+  async function checkAuth() {
+    try {
+      const res = await api.fetchAuthRequired()
+      authRequired = res.required
+    } catch (_) {
+      authRequired = false
+    }
+    authChecked = true
+    if (!authRequired || getToken()) {
+      load()
+    }
+  }
+
+  async function submitToken() {
+    authError = ''
+    setToken(tokenInput.trim())
+    try {
+      await api.fetchStatus()
+      load()
+    } catch (e) {
+      if (e instanceof AuthError) {
+        authError = 'Incorrect token — please try again.'
+      } else {
+        // Status endpoint errored for another reason (e.g. Seerr not configured)
+        // but auth passed — proceed.
+        load()
+      }
+    }
+  }
 
   // ── Global view ─────────────────────────────────────────────────────────
   let view = 'requests'   // 'requests' | 'watchlist'
@@ -67,6 +103,12 @@
       // Refresh cache indicator in background
       api.getCacheStatus().then((s) => { cacheInfo = s }).catch(() => {})
     } catch (e) {
+      if (e instanceof AuthError) {
+        authChecked = true
+        authRequired = true
+        tokenInput = ''
+        return
+      }
       error = e.message
     } finally {
       loading = false
@@ -90,7 +132,7 @@
 
   let watchlistReloadKey = 0  // bump to force WatchlistView remount on manual refresh
 
-  onMount(load)
+  onMount(checkAuth)
 
   // ── Selection ────────────────────────────────────────────────────────────
   function toggleSelect(key) {
@@ -188,6 +230,26 @@
 </script>
 
 <div class="app">
+  <!-- Login overlay shown when APP_SECRET is set and no valid token is stored -->
+  {#if authRequired && (!getToken() || authError)}
+    <div class="login-overlay">
+      <div class="login-card">
+        <h1 class="login-title">Seerr Manager</h1>
+        <p class="login-subtitle">Enter your access token to continue.</p>
+        <form class="login-form" on:submit|preventDefault={submitToken}>
+          <input
+            class="login-input"
+            type="password"
+            placeholder="Access token"
+            bind:value={tokenInput}
+            autocomplete="current-password"
+          />
+          {#if authError}<p class="login-error">{authError}</p>{/if}
+          <button class="login-btn" type="submit">Unlock</button>
+        </form>
+      </div>
+    </div>
+  {/if}
   <FilterBar
     {view}
     {filter}
@@ -306,4 +368,72 @@
     padding: 0.5rem 1.25rem;
   }
   .retry-btn:hover { background: #2d3748; color: #f1f5f9; }
+
+  /* Login overlay */
+  .login-overlay {
+    position: fixed;
+    inset: 0;
+    background: #0d1117;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .login-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 0.75rem;
+    padding: 2rem;
+    width: 100%;
+    max-width: 24rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .login-title {
+    margin: 0;
+    font-size: 1.25rem;
+    color: #f1f5f9;
+    text-align: center;
+  }
+  .login-subtitle {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #64748b;
+    text-align: center;
+  }
+  .login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .login-input {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 0.5rem;
+    color: #f1f5f9;
+    font-size: 0.9rem;
+    padding: 0.6rem 0.75rem;
+    width: 100%;
+    outline: none;
+  }
+  .login-input:focus { border-color: #6366f1; }
+  .login-error {
+    margin: 0;
+    color: #f87171;
+    font-size: 0.8rem;
+    text-align: center;
+  }
+  .login-btn {
+    background: #6366f1;
+    border: none;
+    border-radius: 0.5rem;
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.6rem;
+    width: 100%;
+  }
+  .login-btn:hover { background: #4f46e5; }
 </style>

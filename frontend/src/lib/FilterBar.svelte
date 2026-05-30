@@ -89,13 +89,13 @@
 
     <div class="filter-bar__controls">
       <div class="pill-group" role="group" aria-label="Media type filter">
-        {#each ['all', 'movie', 'tv'] as type}
+        {#each ['all', 'movie', 'tv'] as filterType}
           <button
             class="pill"
-            class:pill--active={filter === type}
-            on:click={() => dispatch('filterChange', type)}
+            class:pill--active={filter === filterType}
+            on:click={() => dispatch('filterChange', filterType)}
           >
-            {type === 'all' ? 'All' : type === 'movie' ? 'Movies' : 'TV'}
+            {filterType === 'all' ? 'All' : filterType === 'movie' ? 'Movies' : 'TV'}
           </button>
         {/each}
       </div>

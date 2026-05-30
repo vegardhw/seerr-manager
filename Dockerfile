@@ -25,6 +25,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ .
 COPY --from=frontend-build /build/backend/static ./static
 
+# Run as a non-root user to limit blast radius if the process is compromised.
+RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
+USER appuser
+
 EXPOSE 8765
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8765"]
