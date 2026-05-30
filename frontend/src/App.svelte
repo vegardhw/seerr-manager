@@ -4,8 +4,13 @@
   import FilterBar from './lib/FilterBar.svelte'
   import CardGrid from './lib/CardGrid.svelte'
   import DetailDrawer from './lib/DetailDrawer.svelte'
+  import WatchlistView from './lib/WatchlistView.svelte'
   import Toast from './lib/Toast.svelte'
 
+  // ── Global view ─────────────────────────────────────────────────────────
+  let view = 'requests'   // 'requests' | 'watchlist'
+
+  // ── Requests state ──────────────────────────────────────────────────────
   let requests = []
   let loading = true
   let error = null
@@ -20,10 +25,13 @@
   let rerequestingKeys = new Set()
   let rerequestingBatch = false
 
+  // ── Cache info ───────────────────────────────────────────────────────────
+  let cacheInfo = null
+
   /** @type {Toast} */
   let toastRef
 
-  // Stable selection key: request ID for normal items, "o-{mediaId}" for orphans
+  // ── Helpers ─────────────────────────────────────────────────────────────
   function itemKey(item) {
     return item.orphan ? `o-${item.media.id}` : String(item.id)
   }
@@ -50,11 +58,14 @@
 
   $: selectedInView = new Set([...selected].filter((k) => filtered.some((r) => r._key === k)))
 
+  // ── Load requests ────────────────────────────────────────────────────────
   async function load() {
     loading = true
     error = null
     try {
       requests = addKeys(await api.fetchRequests())
+      // Refresh cache indicator in background
+      api.getCacheStatus().then((s) => { cacheInfo = s }).catch(() => {})
     } catch (e) {
       error = e.message
     } finally {
@@ -62,8 +73,26 @@
     }
   }
 
+  // Handle refresh button — clears server cache then reloads
+  async function handleRefresh() {
+    if (view === 'watchlist') {
+      // WatchlistView manages its own reload; we just clear the server cache
+      await api.clearCache().catch(() => {})
+      cacheInfo = null
+      // Trigger WatchlistView reload by re-mounting via key (done via event)
+      watchlistReloadKey++
+      return
+    }
+    await api.clearCache().catch(() => {})
+    cacheInfo = null
+    await load()
+  }
+
+  let watchlistReloadKey = 0  // bump to force WatchlistView remount on manual refresh
+
   onMount(load)
 
+  // ── Selection ────────────────────────────────────────────────────────────
   function toggleSelect(key) {
     const next = new Set(selected)
     next.has(key) ? next.delete(key) : next.add(key)
@@ -78,6 +107,7 @@
     selected = new Set()
   }
 
+  // ── Re-request single ─────────────────────────────────────────────────────
   async function doRerequest(item) {
     const key = item._key
     rerequestingKeys = new Set([...rerequestingKeys, key])
@@ -105,6 +135,7 @@
     }
   }
 
+  // ── Re-request batch ──────────────────────────────────────────────────────
   async function doRerequestBatch() {
     const keys = [...selectedInView]
     if (!keys.length) return
@@ -148,20 +179,29 @@
       rerequestingBatch = false
     }
   }
+
+  // ── View switching ────────────────────────────────────────────────────────
+  function handleViewChange(e) {
+    view = e.detail
+    clearSelection()
+  }
 </script>
 
 <div class="app">
   <FilterBar
+    {view}
     {filter}
     {flaggedOnly}
     {mediaStatusFilter}
     {searchQuery}
     {availableMediaStatuses}
+    {cacheInfo}
     totalCount={requests.length}
     filteredCount={filtered.length}
     selectedCount={selectedInView.size}
     rerequesting={rerequestingBatch}
     refreshing={loading}
+    on:viewChange={handleViewChange}
     on:filterChange={(e) => { filter = e.detail; selected = new Set() }}
     on:toggleFlagged={() => { flaggedOnly = !flaggedOnly; selected = new Set() }}
     on:mediaStatusChange={(e) => { mediaStatusFilter = e.detail; selected = new Set() }}
@@ -169,28 +209,35 @@
     on:selectAll={selectAll}
     on:clearSelection={clearSelection}
     on:rerequestSelected={doRerequestBatch}
-    on:refresh={load}
+    on:refresh={handleRefresh}
   />
 
   <main class="main">
-    {#if loading}
-      <div class="state-center">
-        <div class="spinner"></div>
-        <p>Loading requests…</p>
-      </div>
-    {:else if error}
-      <div class="state-center state-center--error">
-        <span style="font-size:2rem">⚠</span>
-        <p>{error}</p>
-        <button class="retry-btn" on:click={load}>Retry</button>
-      </div>
+    {#if view === 'requests'}
+      {#if loading}
+        <div class="state-center">
+          <div class="spinner"></div>
+          <p>Loading requests…</p>
+        </div>
+      {:else if error}
+        <div class="state-center state-center--error">
+          <span style="font-size:2rem">⚠</span>
+          <p>{error}</p>
+          <button class="retry-btn" on:click={load}>Retry</button>
+        </div>
+      {:else}
+        <CardGrid
+          items={filtered}
+          {selected}
+          on:cardClick={(e) => (activeItem = e.detail)}
+          on:toggleSelect={(e) => toggleSelect(e.detail)}
+        />
+      {/if}
     {:else}
-      <CardGrid
-        items={filtered}
-        {selected}
-        on:cardClick={(e) => (activeItem = e.detail)}
-        on:toggleSelect={(e) => toggleSelect(e.detail)}
-      />
+      <!-- key forces a fresh load when the user manually hits refresh on watchlist tab -->
+      {#key watchlistReloadKey}
+        <WatchlistView {toastRef} />
+      {/key}
     {/if}
   </main>
 
@@ -224,7 +271,7 @@
     flex-direction: column;
   }
 
-  .main { flex: 1; }
+  .main { flex: 1; display: flex; flex-direction: column; }
 
   .state-center {
     display: flex;
@@ -235,6 +282,7 @@
     padding: 5rem 1rem;
     color: #64748b;
     font-size: 0.9rem;
+    flex: 1;
   }
   .state-center--error { color: #f87171; }
 
