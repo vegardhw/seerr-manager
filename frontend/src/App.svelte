@@ -3,6 +3,7 @@
   import { api, AuthError, getToken, setToken } from './lib/api.js'
   import FilterBar from './lib/FilterBar.svelte'
   import CardGrid from './lib/CardGrid.svelte'
+  import RequestsTableView from './lib/RequestsTableView.svelte'
   import DetailDrawer from './lib/DetailDrawer.svelte'
   import WatchlistView from './lib/WatchlistView.svelte'
   import Toast from './lib/Toast.svelte'
@@ -45,6 +46,7 @@
 
   // ── Global view ─────────────────────────────────────────────────────────
   let view = 'requests'   // 'requests' | 'watchlist'
+  let viewMode = 'grid'   // 'grid' | 'table'  — persisted per-view below
 
   // ── Requests state ──────────────────────────────────────────────────────
   let requests = []
@@ -298,6 +300,10 @@
     view = e.detail
     clearSelection()
   }
+
+  function handleViewModeChange(e) {
+    viewMode = e.detail
+  }
 </script>
 
 <div class="app">
@@ -329,6 +335,7 @@
     {searchQuery}
     {availableMediaStatuses}
     {cacheInfo}
+    {viewMode}
     totalCount={requests.length}
     filteredCount={filtered.length}
     selectedCount={selectedInView.size}
@@ -345,6 +352,7 @@
     on:rerequestSelected={doRerequestBatch}
     on:resetSelected={doResetBatch}
     on:refresh={handleRefresh}
+    on:viewModeChange={handleViewModeChange}
   />
 
   <main class="main">
@@ -361,12 +369,21 @@
           <button class="retry-btn" on:click={load}>Retry</button>
         </div>
       {:else}
-        <CardGrid
-          items={filtered}
-          {selected}
-          on:cardClick={(e) => (activeItem = e.detail)}
-          on:toggleSelect={(e) => toggleSelect(e.detail)}
-        />
+        {#if viewMode === 'table'}
+          <RequestsTableView
+            items={filtered}
+            {selected}
+            on:cardClick={(e) => (activeItem = e.detail)}
+            on:toggleSelect={(e) => toggleSelect(e.detail)}
+          />
+        {:else}
+          <CardGrid
+            items={filtered}
+            {selected}
+            on:cardClick={(e) => (activeItem = e.detail)}
+            on:toggleSelect={(e) => toggleSelect(e.detail)}
+          />
+        {/if}
       {/if}
     {:else}
       <!-- key forces a fresh load when the user manually hits refresh on watchlist tab -->
@@ -417,7 +434,7 @@
     justify-content: center;
     gap: 1rem;
     padding: 5rem 1rem;
-    color: #64748b;
+    color: #94a3b8;
     font-size: 0.9rem;
     flex: 1;
   }
@@ -437,7 +454,7 @@
     background: #1e293b;
     border: none;
     border-radius: 0.5rem;
-    color: #94a3b8;
+    color: #b0bec5;
     cursor: pointer;
     font-size: 0.875rem;
     padding: 0.5rem 1.25rem;
@@ -474,7 +491,7 @@
   .login-subtitle {
     margin: 0;
     font-size: 0.85rem;
-    color: #64748b;
+    color: #94a3b8;
     text-align: center;
   }
   .login-form {

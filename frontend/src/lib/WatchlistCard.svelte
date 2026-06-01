@@ -204,7 +204,7 @@
   }
   .wcard__year {
     font-size: 0.65rem;
-    color: #64748b;
+    color: #94a3b8;
     margin: 0;
   }
 

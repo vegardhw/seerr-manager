@@ -289,7 +289,7 @@
     margin: 0 0 0.25rem;
     line-height: 1.3;
   }
-  .drawer__year { font-size: 0.8rem; color: #64748b; margin: 0 0 0.5rem; }
+  .drawer__year { font-size: 0.8rem; color: #94a3b8; margin: 0 0 0.5rem; }
 
   .drawer__statuses { display: flex; flex-wrap: wrap; gap: 0.375rem; }
 
@@ -328,7 +328,7 @@
 
   .drawer__overview {
     font-size: 0.825rem;
-    color: #94a3b8;
+    color: #b0bec5;
     line-height: 1.6;
     margin: 0 0 1rem;
   }
@@ -338,7 +338,7 @@
     font-size: 0.7rem;
     font-weight: 700;
     letter-spacing: 0.08em;
-    color: #475569;
+    color: #64748b;
     text-transform: uppercase;
     margin: 0 0 0.5rem;
   }
@@ -351,7 +351,7 @@
     gap: 0.5rem;
     font-size: 0.8rem;
   }
-  .id-label { color: #64748b; flex-shrink: 0; }
+  .id-label { color: #94a3b8; flex-shrink: 0; }
   .id-value { color: #e2e8f0; font-variant-numeric: tabular-nums; font-weight: 500; }
   .id-value--missing { color: #f87171; }
   .id-value--resolved { color: #34d399; }
@@ -374,7 +374,7 @@
     transition: all 0.15s;
     flex: 1;
   }
-  .btn--ghost { background: #1e293b; color: #94a3b8; }
+  .btn--ghost { background: #1e293b; color: #b0bec5; }
   .btn--ghost:hover { background: #2d3748; color: #f1f5f9; }
   .btn--primary { background: #6366f1; color: #fff; }
   .btn--primary:hover:not(:disabled) { background: #4f46e5; }

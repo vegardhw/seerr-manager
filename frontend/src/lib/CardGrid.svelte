@@ -54,7 +54,7 @@
     justify-content: center;
     gap: 0.75rem;
     padding: 4rem 1rem;
-    color: #475569;
+    color: #64748b;
   }
   .empty__icon { font-size: 3rem; }
   .empty p { font-size: 0.9rem; margin: 0; }

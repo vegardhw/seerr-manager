@@ -14,6 +14,7 @@
   export let refreshing = false
   export let availableMediaStatuses = []
   export let cacheInfo = null            // { ttl_seconds, entries } | null
+  export let viewMode = 'grid'           // 'grid' | 'table'
 
   const dispatch = createEventDispatcher()
 
@@ -66,6 +67,39 @@
           class="cache-badge"
           title="Data served from cache. Refresh or wait for TTL to re-fetch."
         >⚡ cached</span>
+      {/if}
+      {#if view === 'requests'}
+        <div class="view-toggle" role="group" aria-label="View mode">
+          <button
+            class="vtoggle"
+            class:vtoggle--active={viewMode === 'grid'}
+            title="Grid view"
+            on:click={() => dispatch('viewModeChange', 'grid')}
+            aria-pressed={viewMode === 'grid'}
+          >
+            <!-- 2×3 grid icon -->
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <rect x="1"   y="1"   width="4.5" height="4.5" rx="0.75" fill="currentColor"/>
+              <rect x="8.5" y="1"   width="4.5" height="4.5" rx="0.75" fill="currentColor"/>
+              <rect x="1"   y="8.5" width="4.5" height="4.5" rx="0.75" fill="currentColor"/>
+              <rect x="8.5" y="8.5" width="4.5" height="4.5" rx="0.75" fill="currentColor"/>
+            </svg>
+          </button>
+          <button
+            class="vtoggle"
+            class:vtoggle--active={viewMode === 'table'}
+            title="Table view"
+            on:click={() => dispatch('viewModeChange', 'table')}
+            aria-pressed={viewMode === 'table'}
+          >
+            <!-- rows icon -->
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <rect x="1" y="2"   width="12" height="2" rx="0.5" fill="currentColor"/>
+              <rect x="1" y="6"   width="12" height="2" rx="0.5" fill="currentColor"/>
+              <rect x="1" y="10" width="12" height="2" rx="0.5" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
       {/if}
       <button
         class="btn-refresh"
@@ -211,7 +245,7 @@
     background: transparent;
     border: none;
     border-radius: 0.25rem;
-    color: #64748b;
+    color: #94a3b8;
     cursor: pointer;
     font-size: 0.78rem;
     font-weight: 600;
@@ -233,7 +267,7 @@
 
   .filter-bar__count {
     font-size: 0.75rem;
-    color: #64748b;
+    color: #94a3b8;
     font-variant-numeric: tabular-nums;
   }
 
@@ -248,11 +282,37 @@
     white-space: nowrap;
   }
 
+  /* ── View mode toggle (grid / table) ── */
+  .view-toggle {
+    display: flex;
+    background: #1e293b;
+    border-radius: 0.375rem;
+    padding: 2px;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .vtoggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 0.25rem;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.25rem 0.45rem;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+  .vtoggle:hover { color: #f1f5f9; background: #2d3748; }
+  .vtoggle--active { background: #334155; color: #f1f5f9; }
+
   .btn-refresh {
     background: none;
     border: 1px solid #1e293b;
     border-radius: 0.375rem;
-    color: #64748b;
+    color: #94a3b8;
     cursor: pointer;
     font-size: 1rem;
     line-height: 1;
@@ -276,7 +336,7 @@
     outline: none;
     transition: border-color 0.15s;
   }
-  .search::placeholder { color: #475569; }
+  .search::placeholder { color: #64748b; }
   .search:focus { border-color: #6366f1; }
   .search::-webkit-search-cancel-button { cursor: pointer; }
 
@@ -308,7 +368,7 @@
     background: transparent;
     border: none;
     border-radius: 0.25rem;
-    color: #94a3b8;
+    color: #b0bec5;
     cursor: pointer;
     font-size: 0.8rem;
     font-weight: 500;
@@ -337,7 +397,7 @@
     transition: all 0.15s;
     white-space: nowrap;
   }
-  .btn--ghost { background: #1e293b; color: #94a3b8; }
+  .btn--ghost { background: #1e293b; color: #b0bec5; }
   .btn--ghost:hover { background: #2d3748; color: #f1f5f9; }
   .btn--primary { background: #6366f1; color: #fff; }
   .btn--primary:hover:not(:disabled) { background: #4f46e5; }
