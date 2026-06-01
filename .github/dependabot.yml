@@ -1,0 +1,55 @@
+version: 2
+
+updates:
+  # -------------------------------------------------------------------------
+  # npm — frontend
+  # -------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Svelte 5 is a completely different framework API (runes, new component
+      # model) that requires a full rewrite of every .svelte file.  The six
+      # security advisories flagged against svelte <=5.55.6 are ALL SSR-only
+      # (server-side rendering) vulnerabilities.  This project is a pure SPA —
+      # SSR is never invoked — so they pose no actual risk.  Block major bumps
+      # until a deliberate Svelte 5 migration is planned.
+      - dependency-name: "svelte"
+        update-types: ["version-update:semver-major"]
+
+      # Vite 6+ requires @sveltejs/vite-plugin-svelte v5+, which in turn
+      # requires Svelte 5.  There is no upgrade path for Vite that preserves
+      # Svelte 4.  The one direct Vite advisory (GHSA-4w7w-66w2-5vf9, path
+      # traversal in dev-server .map handling) only affects `npm run dev` and
+      # has no backport to the Vite 5.x line (EOL).
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+
+      # Locked to Vite 5 peer — unblocking this independently achieves nothing.
+      - dependency-name: "@sveltejs/vite-plugin-svelte"
+        update-types: ["version-update:semver-major"]
+
+  # -------------------------------------------------------------------------
+  # pip — backend
+  # -------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+
+  # -------------------------------------------------------------------------
+  # Docker base images
+  # -------------------------------------------------------------------------
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # -------------------------------------------------------------------------
+  # GitHub Actions
+  # -------------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
