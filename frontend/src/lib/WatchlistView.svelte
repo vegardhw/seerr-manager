@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from './api.js'
   import WatchlistCard from './WatchlistCard.svelte'
+  import WatchlistTableView from './WatchlistTableView.svelte'
 
   /** Passed down from App so toasts appear in the shared container */
   export let toastRef = null
@@ -20,6 +21,7 @@
   let requesting = false
   let searchQuery = ''
   let typeFilter = 'all' // 'all' | 'movie' | 'tv'
+  let viewMode = 'grid'  // 'grid' | 'table'
 
   // ── Load ───────────────────────────────────────────────────────────────────
   async function load() {
@@ -260,6 +262,37 @@
         {activeItems.length} item{activeItems.length === 1 ? '' : 's'}
       </div>
 
+      <!-- View mode toggle -->
+      <div class="view-toggle" role="group" aria-label="View mode">
+        <button
+          class="vtoggle"
+          class:vtoggle--active={viewMode === 'grid'}
+          title="Grid view"
+          on:click={() => (viewMode = 'grid')}
+          aria-pressed={viewMode === 'grid'}
+        >
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <rect x="1"   y="1"   width="4.5" height="4.5" rx="0.75" fill="currentColor"/>
+            <rect x="8.5" y="1"   width="4.5" height="4.5" rx="0.75" fill="currentColor"/>
+            <rect x="1"   y="8.5" width="4.5" height="4.5" rx="0.75" fill="currentColor"/>
+            <rect x="8.5" y="8.5" width="4.5" height="4.5" rx="0.75" fill="currentColor"/>
+          </svg>
+        </button>
+        <button
+          class="vtoggle"
+          class:vtoggle--active={viewMode === 'table'}
+          title="Table view"
+          on:click={() => (viewMode = 'table')}
+          aria-pressed={viewMode === 'table'}
+        >
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <rect x="1" y="2"   width="12" height="2" rx="0.5" fill="currentColor"/>
+            <rect x="1" y="6"   width="12" height="2" rx="0.5" fill="currentColor"/>
+            <rect x="1" y="10" width="12" height="2" rx="0.5" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+
       <button
         class="btn btn--ghost btn--icon"
         title="Refresh watchlist comparison"
@@ -267,7 +300,7 @@
       >↻</button>
     </div>
 
-    <!-- ── Card grid ── -->
+    <!-- ── Card grid / table ── -->
     {#if activeItems.length === 0}
       <div class="empty">
         <span class="empty__icon">📭</span>
@@ -283,6 +316,13 @@
           {/if}
         </p>
       </div>
+    {:else if viewMode === 'table'}
+      <WatchlistTableView
+        items={activeItems}
+        {selected}
+        selectable={activeTab === 'watchlist_only'}
+        on:toggleSelect={(e) => toggleSelect(e.detail)}
+      />
     {:else}
       <div class="wgrid">
         {#each activeItems as item (item.tmdbId)}
@@ -314,7 +354,7 @@
     justify-content: center;
     gap: 1rem;
     padding: 5rem 1rem;
-    color: #64748b;
+    color: #94a3b8;
     font-size: 0.9rem;
     flex: 1;
   }
@@ -360,7 +400,7 @@
   .stat__label {
     font-size: 0.65rem;
     font-weight: 600;
-    color: #475569;
+    color: #64748b;
     letter-spacing: 0.04em;
     white-space: nowrap;
     text-transform: uppercase;
@@ -368,7 +408,7 @@
   .stat--warn  .stat__value { color: #fbbf24; }
   .stat--blue  .stat__value { color: #60a5fa; }
   .stat--green .stat__value { color: #4ade80; }
-  .stat--muted .stat__value { color: #64748b; }
+  .stat--muted .stat__value { color: #94a3b8; }
 
   /* ── Info banner ── */
   .info-banner {
@@ -405,7 +445,7 @@
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
-    color: #64748b;
+    color: #94a3b8;
     cursor: pointer;
     font-size: 0.8rem;
     font-weight: 600;
@@ -445,7 +485,7 @@
   .col-desc p {
     margin: 0;
     font-size: 0.78rem;
-    color: #475569;
+    color: #64748b;
     line-height: 1.5;
   }
 
@@ -471,7 +511,7 @@
     outline: none;
     transition: border-color 0.15s;
   }
-  .search::placeholder { color: #475569; }
+  .search::placeholder { color: #64748b; }
   .search:focus { border-color: #6366f1; }
   .search::-webkit-search-cancel-button { cursor: pointer; }
 
@@ -488,7 +528,7 @@
     background: transparent;
     border: none;
     border-radius: 0.25rem;
-    color: #94a3b8;
+    color: #b0bec5;
     cursor: pointer;
     font-size: 0.75rem;
     font-weight: 500;
@@ -507,11 +547,36 @@
 
   .toolbar__count {
     font-size: 0.72rem;
-    color: #475569;
+    color: #64748b;
     margin-left: auto;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
+
+  /* ── View mode toggle ── */
+  .view-toggle {
+    display: flex;
+    background: #1e293b;
+    border-radius: 0.375rem;
+    padding: 2px;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .vtoggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 0.25rem;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0.25rem 0.45rem;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+  .vtoggle:hover { color: #f1f5f9; background: #2d3748; }
+  .vtoggle--active { background: #334155; color: #f1f5f9; }
 
   /* ── Buttons ── */
   .btn {
@@ -526,7 +591,7 @@
   }
   .btn--ghost {
     background: #1e293b;
-    color: #94a3b8;
+    color: #b0bec5;
   }
   .btn--ghost:hover { background: #2d3748; color: #f1f5f9; }
   .btn--primary {
@@ -549,7 +614,7 @@
     justify-content: center;
     gap: 0.75rem;
     padding: 4rem 1rem;
-    color: #475569;
+    color: #64748b;
     flex: 1;
   }
   .empty__icon { font-size: 3rem; }
