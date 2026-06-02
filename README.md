@@ -1,6 +1,6 @@
 # seerr-manager
 
-A self-hosted web dashboard for managing **Overseerr / Jellyseerr** requests.
+A self-hosted web dashboard for managing **Seerr** requests.
 It surfaces stuck, flagged, or deleted media and lets you re-request individual items or a whole batch in one click — fixing common edge-cases that Seerr itself does not handle.
 A second **Watchlist** tab compares your Plex watchlist against Seerr and lets you bulk-request anything that is missing.
 

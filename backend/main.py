@@ -34,17 +34,23 @@ SEERR_API_KEY = os.getenv("SEERR_API_KEY", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w342"
 
-# Optional shared secret — if set, all /api/* routes require:
+# Optional Arr service configuration - both default to empty (feature disabled)
+RADARR_URL = os.getenv("RADARR_URL", "").rstrip("/")
+RADARR_API_KEY = os.getenv("RADARR_API_KEY", "")
+SONARR_URL = os.getenv("SONARR_URL", "").rstrip("/")
+SONARR_API_KEY = os.getenv("SONARR_API_KEY", "")
+
+# Optional shared secret - if set, all /api/* routes require:
 #   Authorization: Bearer <APP_SECRET>
 # Strongly recommended for any deployment reachable beyond localhost.
 APP_SECRET = os.getenv("APP_SECRET", "")
 
 # TMDB auth: v3 keys are short hex strings; v4 read-access tokens are JWTs
 # (start with "eyJ"). The v3 endpoint accepts both, but JWTs must be sent
-# as a Bearer header — they are not valid as ?api_key= query params.
+# as a Bearer header - they are not valid as ?api_key= query params.
 _TMDB_IS_BEARER = TMDB_API_KEY.startswith("eyJ")
 
-# Cache TTL in seconds — configurable via env, defaults to 5 minutes.
+# Cache TTL in seconds - configurable via env, defaults to 5 minutes.
 # Set to 0 to disable caching (always re-fetch from Seerr/TMDB).
 CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", "300"))
 
@@ -64,6 +70,27 @@ if SEERR_URL:
     if _parsed.scheme not in ("http", "https") or not _parsed.netloc:
         raise RuntimeError(
             f"SEERR_URL must be a valid http(s) URL, got: {SEERR_URL!r}"
+        )
+
+for _arr_var, _arr_val in [("RADARR_URL", RADARR_URL), ("SONARR_URL", SONARR_URL)]:
+    if _arr_val:
+        _p = urlparse(_arr_val)
+        if _p.scheme not in ("http", "https") or not _p.netloc:
+            raise RuntimeError(
+                f"{_arr_var} must be a valid http(s) URL, got: {_arr_val!r}"
+            )
+
+# Warn about partial arr configuration (URL without key or vice-versa)
+for _svc, _url, _key in [
+    ("Radarr", RADARR_URL, RADARR_API_KEY),
+    ("Sonarr", SONARR_URL, SONARR_API_KEY),
+]:
+    if bool(_url) != bool(_key):
+        warnings.warn(
+            f"{_svc} is partially configured - both {_svc.upper()}_URL and "
+            f"{_svc.upper()}_API_KEY must be set. Library view will be disabled for {_svc}.",
+            RuntimeWarning,
+            stacklevel=1,
         )
 
 # In dev mode (no creds yet) we warn rather than crash so the frontend can
@@ -114,7 +141,7 @@ async def require_auth(
 ):
     """Require a valid Bearer token when APP_SECRET is configured."""
     if not APP_SECRET:
-        return  # auth disabled — open deployment
+        return  # auth disabled - open deployment
     if creds is None or not hmac.compare_digest(creds.credentials, APP_SECRET):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -128,7 +155,7 @@ def _require_credentials():
     if _missing:
         raise HTTPException(
             status_code=503,
-            detail="Server not configured — one or more required environment variables are missing.",
+            detail="Server not configured - one or more required environment variables are missing.",
         )
 
 
@@ -144,10 +171,18 @@ def tmdb_headers() -> dict:
 
 
 def tmdb_params(**kwargs) -> dict:
-    """Return query params for TMDB — api_key only needed for v3 string keys."""
+    """Return query params for TMDB - api_key only needed for v3 string keys."""
     if _TMDB_IS_BEARER:
         return {**kwargs}
     return {"api_key": TMDB_API_KEY, **kwargs}
+
+
+def radarr_headers() -> dict:
+    return {"X-Api-Key": RADARR_API_KEY}
+
+
+def sonarr_headers() -> dict:
+    return {"X-Api-Key": SONARR_API_KEY}
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +265,7 @@ def is_flagged(item: dict) -> tuple[bool, list[str]]:
 
     media_status = media.get("status")
     if media_status == 7:
-        reasons.append("Media deleted from library — needs re-request")
+        reasons.append("Media deleted from library - needs re-request")
     elif media_status in (2, 3):
         created_at = item.get("createdAt", "")
         if created_at:
@@ -451,7 +486,167 @@ def make_orphan_item(media: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Endpoints — Requests view
+# Arr service helpers (Radarr + Sonarr)
+# ---------------------------------------------------------------------------
+
+async def _empty() -> list:
+    """No-op coroutine returning [] - used when an arr service is not configured."""
+    return []
+
+
+async def fetch_radarr_movies(client: httpx.AsyncClient) -> list:
+    """Fetch all movies from Radarr. Returns [] on error so Sonarr still works."""
+    try:
+        resp = await client.get(f"{RADARR_URL}/api/v3/movie", headers=radarr_headers())
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        logger.warning("Could not fetch Radarr movies: %s", exc)
+        return []
+
+
+async def fetch_sonarr_series(client: httpx.AsyncClient) -> list:
+    """Fetch all series from Sonarr. Returns [] on error so Radarr still works."""
+    try:
+        resp = await client.get(f"{SONARR_URL}/api/v3/series", headers=sonarr_headers())
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        logger.warning("Could not fetch Sonarr series: %s", exc)
+        return []
+
+
+def _arr_poster_url(images: list) -> str | None:
+    """Extract the remote TMDB poster URL from a Radarr/Sonarr images array.
+
+    Only returns URLs with an explicit http/https scheme so that a compromised
+    or misconfigured arr instance cannot inject data:/javascript:/file:// URIs
+    into the frontend <img src> attribute.
+    """
+    for img in images:
+        if img.get("coverType") != "poster":
+            continue
+        url = img.get("remoteUrl")
+        if isinstance(url, str) and url.startswith(("http://", "https://")):
+            return url
+    return None
+
+
+# Maximum number of Sonarr series for which we will fire TMDB /find fallback
+# requests.  Protects against unbounded API call storms on very large libraries
+# and keeps total latency well within the httpx client timeout.
+_MAX_TMDB_FALLBACK_LOOKUPS = 500
+
+
+def normalize_radarr_movie(m: dict) -> dict:
+    # Cast tmdbId to int so it matches the integer keys in the Seerr cross-
+    # reference sets.  A string "12345" != integer 12345 in a Python set lookup.
+    _raw_tmdb = m.get("tmdbId")
+    try:
+        _tmdb_id: int | None = int(_raw_tmdb) if _raw_tmdb else None
+    except (TypeError, ValueError):
+        _tmdb_id = None
+
+    return {
+        "libraryId": m.get("id"),
+        "tmdbId": _tmdb_id,
+        "imdbId": m.get("imdbId") or None,
+        "title": m.get("title") or m.get("originalTitle") or "Unknown",
+        "year": m.get("year") or None,
+        "overview": m.get("overview") or None,
+        "posterUrl": _arr_poster_url(m.get("images", [])),
+        "hasFile": bool(m.get("hasFile")),
+        "sizeOnDisk": m.get("sizeOnDisk") or 0,
+        "status": m.get("status"),   # released / announced / inCinemas / tba / deleted
+        "monitored": bool(m.get("monitored")),
+        "genres": m.get("genres") or [],
+        "source": "radarr",
+        "type": "movie",
+    }
+
+
+def normalize_sonarr_series(s: dict, resolved_tmdb_id: int | None = None) -> dict:
+    stats = s.get("statistics") or {}
+    tmdb_id = s.get("tmdbId") or resolved_tmdb_id or None
+    return {
+        "libraryId": s.get("id"),
+        "tmdbId": int(tmdb_id) if tmdb_id else None,
+        "tvdbId": s.get("tvdbId") or None,
+        "title": s.get("title") or "Unknown",
+        "year": s.get("year") or None,
+        "overview": s.get("overview") or None,
+        "posterUrl": _arr_poster_url(s.get("images", [])),
+        "hasFile": (stats.get("episodeFileCount", 0) > 0),
+        "sizeOnDisk": stats.get("sizeOnDisk") or 0,
+        "status": s.get("status"),   # continuing / ended
+        "monitored": bool(s.get("monitored")),
+        "genres": s.get("genres") or [],
+        "network": s.get("network") or None,
+        "seasonCount": stats.get("seasonCount") or 0,
+        "totalEpisodeCount": stats.get("totalEpisodeCount") or 0,
+        "episodeFileCount": stats.get("episodeFileCount") or 0,
+        "source": "sonarr",
+        "type": "tv",
+    }
+
+
+async def resolve_sonarr_tmdb_ids(
+    client: httpx.AsyncClient,
+    series: list[dict],
+) -> dict[int, int]:
+    """Batch-resolve TVDB IDs → TMDB IDs for Sonarr series that have no tmdbId.
+
+    Safety measures:
+    - tvdbId values are validated and cast to int before being interpolated into
+      the TMDB URL path, preventing path-injection from malformed Sonarr data.
+    - Total lookups are capped at _MAX_TMDB_FALLBACK_LOOKUPS to prevent
+      unbounded API call storms on large libraries exceeding the request timeout.
+    - A semaphore limits concurrency to stay within TMDB rate limits.
+    """
+    # Validate and cast tvdbId to int; skip any non-integer values.
+    valid: list[int] = []
+    for s in series:
+        raw = s.get("tvdbId")
+        if raw is None:
+            continue
+        try:
+            valid.append(int(raw))
+        except (TypeError, ValueError):
+            logger.warning("Sonarr series has non-integer tvdbId %r — skipping TMDB lookup", raw)
+
+    if len(valid) > _MAX_TMDB_FALLBACK_LOOKUPS:
+        logger.warning(
+            "Sonarr returned %d series without tmdbId; capping TMDB fallback "
+            "lookups at %d to avoid request timeout.",
+            len(valid), _MAX_TMDB_FALLBACK_LOOKUPS,
+        )
+        valid = valid[:_MAX_TMDB_FALLBACK_LOOKUPS]
+
+    sem = asyncio.Semaphore(10)
+
+    async def _one(tvdb_id: int) -> tuple[int, int | None]:
+        async with sem:
+            try:
+                resp = await client.get(
+                    # tvdb_id is guaranteed int — safe to interpolate in path.
+                    f"https://api.themoviedb.org/3/find/{tvdb_id}",
+                    params=tmdb_params(external_source="tvdb_id"),
+                    headers=tmdb_headers(),
+                )
+                if resp.status_code == 200:
+                    tv_results = resp.json().get("tv_results", [])
+                    if tv_results:
+                        return tvdb_id, tv_results[0].get("id")
+            except Exception:
+                pass
+            return tvdb_id, None
+
+    pairs = await asyncio.gather(*[_one(tvdb_id) for tvdb_id in valid])
+    return {tvdb_id: tmdb_id for tvdb_id, tmdb_id in pairs if tmdb_id}
+
+
+# ---------------------------------------------------------------------------
+# Endpoints - Requests view
 # ---------------------------------------------------------------------------
 
 @app.get("/api/requests")
@@ -506,7 +701,7 @@ async def _do_rerequest(client: httpx.AsyncClient, request_id: int) -> dict:
     if not tmdb_id:
         raise HTTPException(
             status_code=422,
-            detail=f"Request {request_id} has no TMDB ID — resolve the ID mismatch first",
+            detail=f"Request {request_id} has no TMDB ID - resolve the ID mismatch first",
         )
 
     del_req = await client.delete(
@@ -641,7 +836,7 @@ async def _do_reset_orphan(client: httpx.AsyncClient, seerr_media_id: int) -> No
 
 
 # ---------------------------------------------------------------------------
-# Endpoints — Re-request actions
+# Endpoints - Re-request actions
 # ---------------------------------------------------------------------------
 
 @app.post("/api/rerequest/batch")
@@ -673,7 +868,7 @@ async def rerequest_batch(body: BatchBody, _: None = Depends(require_auth)):
                 logger.error("Unexpected error re-requesting orphan mediaId=%s: %s", orphan.seerrMediaId, exc)
                 errors.append({"seerrMediaId": orphan.seerrMediaId, "error": "Internal error"})
 
-    await cache_invalidate("requests", "watchlist_comparison")
+    await cache_invalidate("requests", "watchlist_comparison", "library_untracked")
     return {"results": results, "errors": errors}
 
 
@@ -684,7 +879,7 @@ async def rerequest_orphan(body: OrphanBody, _: None = Depends(require_auth)):
         new_req = await _do_request_orphan(
             client, body.seerrMediaId, body.tmdbId, body.mediaType
         )
-    await cache_invalidate("requests", "watchlist_comparison")
+    await cache_invalidate("requests", "watchlist_comparison", "library_untracked")
     return {"success": True, "newRequest": new_req}
 
 
@@ -693,12 +888,12 @@ async def rerequest_single(request_id: int, _: None = Depends(require_auth)):
     _require_credentials()
     async with httpx.AsyncClient(timeout=30) as client:
         new_req = await _do_rerequest(client, request_id)
-    await cache_invalidate("requests", "watchlist_comparison")
+    await cache_invalidate("requests", "watchlist_comparison", "library_untracked")
     return {"success": True, "newRequest": new_req}
 
 
 # ---------------------------------------------------------------------------
-# Endpoints — Reset actions  (purge without re-requesting)
+# Endpoints - Reset actions  (purge without re-requesting)
 # ---------------------------------------------------------------------------
 
 @app.post("/api/reset/batch")
@@ -728,7 +923,7 @@ async def reset_batch(body: BatchResetBody, _: None = Depends(require_auth)):
                 logger.error("Unexpected error resetting orphan mediaId=%s: %s", media_id, exc)
                 errors.append({"seerrMediaId": media_id, "error": "Internal error"})
 
-    await cache_invalidate("requests", "watchlist_comparison")
+    await cache_invalidate("requests", "watchlist_comparison", "library_untracked")
     return {"results": results, "errors": errors}
 
 
@@ -737,7 +932,7 @@ async def reset_orphan(body: ResetOrphanBody, _: None = Depends(require_auth)):
     _require_credentials()
     async with httpx.AsyncClient(timeout=30) as client:
         await _do_reset_orphan(client, body.seerrMediaId)
-    await cache_invalidate("requests", "watchlist_comparison")
+    await cache_invalidate("requests", "watchlist_comparison", "library_untracked")
     return {"success": True}
 
 
@@ -746,12 +941,12 @@ async def reset_single(request_id: int, _: None = Depends(require_auth)):
     _require_credentials()
     async with httpx.AsyncClient(timeout=30) as client:
         await _do_reset(client, request_id)
-    await cache_invalidate("requests", "watchlist_comparison")
+    await cache_invalidate("requests", "watchlist_comparison", "library_untracked")
     return {"success": True}
 
 
 # ---------------------------------------------------------------------------
-# Endpoints — Watchlist comparison
+# Endpoints - Watchlist comparison
 # ---------------------------------------------------------------------------
 
 @app.get("/api/watchlist/comparison")
@@ -773,7 +968,7 @@ async def get_watchlist_comparison(_: None = Depends(require_auth)):
             user_id = me["id"]
         except Exception as exc:
             logger.error("Cannot identify Seerr user: %s", exc)
-            raise HTTPException(status_code=502, detail="Cannot reach Seerr — check SEERR_URL and SEERR_API_KEY.")
+            raise HTTPException(status_code=502, detail="Cannot reach Seerr - check SEERR_URL and SEERR_API_KEY.")
 
         # Parallel fetch: watchlist, all requests, all media
         try:
@@ -893,12 +1088,12 @@ async def request_watchlist_items(body: WatchlistRequestBody, _: None = Depends(
     for r in item_results:
         (results if r.get("success") else errors).append(r)
 
-    await cache_invalidate("requests", "watchlist_comparison")
+    await cache_invalidate("requests", "watchlist_comparison", "library_untracked")
     return {"results": results, "errors": errors}
 
 
 # ---------------------------------------------------------------------------
-# Endpoints — Cache management
+# Endpoints - Cache management
 # ---------------------------------------------------------------------------
 
 @app.get("/api/cache/status")
@@ -922,7 +1117,7 @@ async def clear_cache(_: None = Depends(require_auth)):
 
 
 # ---------------------------------------------------------------------------
-# Endpoints — Health / status
+# Endpoints - Health / status
 # ---------------------------------------------------------------------------
 
 
@@ -967,6 +1162,132 @@ async def get_status(_: None = Depends(require_auth)):
         "seerr": {"ok": seerr_ok, "version": seerr_version},
         "tmdb": {"ok": tmdb_ok},
     }
+
+
+# ---------------------------------------------------------------------------
+# Endpoints - Library view (Radarr + Sonarr cross-reference)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/library/untracked")
+async def get_library_untracked(_: None = Depends(require_auth)):
+    _require_credentials()
+    cached = await cache_get("library_untracked")
+    if cached is not None:
+        return cached
+
+    radarr_ok = bool(RADARR_URL and RADARR_API_KEY)
+    sonarr_ok = bool(SONARR_URL and SONARR_API_KEY)
+
+    # Neither service configured - return an empty payload so the frontend
+    # can render its "not configured" panel without a 503.
+    if not radarr_ok and not sonarr_ok:
+        return {
+            "untracked": [],
+            "watchlistedNotInSeerr": [],
+            "inSeerr": [],
+            "stats": {
+                "radarrTotal": 0, "sonarrTotal": 0,
+                "untracked": 0, "watchlistedNotInSeerr": 0,
+                "inSeerr": 0, "noTmdbId": 0,
+            },
+            "configured": {"radarr": False, "sonarr": False},
+        }
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        # Identify the API-key owner so we can fetch their watchlist
+        try:
+            me_resp = await client.get(
+                f"{SEERR_URL}/api/v1/auth/me",
+                headers=seerr_headers(),
+            )
+            me_resp.raise_for_status()
+            user_id = me_resp.json()["id"]
+        except Exception as exc:
+            logger.error("Cannot identify Seerr user: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail="Cannot reach Seerr - check SEERR_URL and SEERR_API_KEY.",
+            )
+
+        # Parallel fetch: arr libraries + Seerr media + watchlist
+        radarr_raw, sonarr_raw, seerr_media, watchlist_raw = await asyncio.gather(
+            fetch_radarr_movies(client) if radarr_ok else _empty(),
+            fetch_sonarr_series(client) if sonarr_ok else _empty(),
+            fetch_all_pages(client, "/api/v1/media"),
+            fetch_watchlist(client, user_id),
+        )
+
+        # Normalise Radarr movies
+        radarr_items = [normalize_radarr_movie(m) for m in radarr_raw]
+
+        # Normalise Sonarr series; batch-resolve any missing TMDB IDs via TMDB /find
+        sonarr_no_tmdb = [s for s in sonarr_raw if not s.get("tmdbId")]
+        resolved_ids: dict[int, int] = {}
+        if sonarr_no_tmdb:
+            resolved_ids = await resolve_sonarr_tmdb_ids(client, sonarr_no_tmdb)
+
+        sonarr_items = [
+            normalize_sonarr_series(
+                s,
+                resolved_tmdb_id=resolved_ids.get(s.get("tvdbId") or 0),
+            )
+            for s in sonarr_raw
+        ]
+
+        # Build TMDB ID sets / maps from Seerr
+        seerr_tmdb_ids: set[int] = {
+            m["tmdbId"] for m in seerr_media if m.get("tmdbId")
+        }
+        seerr_media_by_tmdb: dict[int, dict] = {
+            m["tmdbId"]: m for m in seerr_media if m.get("tmdbId")
+        }
+
+        # Build TMDB ID set from watchlist
+        watchlist_tmdb_ids: set[int] = {
+            w["tmdbId"] for w in watchlist_raw if w.get("tmdbId")
+        }
+
+        # Categorise every library item into one of three buckets
+        untracked: list[dict] = []
+        watchlisted_not_in_seerr: list[dict] = []
+        in_seerr: list[dict] = []
+        no_tmdb_count = 0
+
+        for item in radarr_items + sonarr_items:
+            tid = item.get("tmdbId")
+            if not tid:
+                no_tmdb_count += 1
+                continue
+
+            if tid in seerr_tmdb_ids:
+                seerr_m = seerr_media_by_tmdb.get(tid, {})
+                in_seerr.append({
+                    **item,
+                    "seerrMediaStatus": MEDIA_STATUS.get(seerr_m.get("status")) if seerr_m else None,
+                    "seerrMediaStatusNum": seerr_m.get("status") if seerr_m else None,
+                    "seerrMediaId": seerr_m.get("id") if seerr_m else None,
+                })
+            elif tid in watchlist_tmdb_ids:
+                watchlisted_not_in_seerr.append(item)
+            else:
+                untracked.append(item)
+
+    result = {
+        "untracked": untracked,
+        "watchlistedNotInSeerr": watchlisted_not_in_seerr,
+        "inSeerr": in_seerr,
+        "stats": {
+            "radarrTotal": len(radarr_items),
+            "sonarrTotal": len(sonarr_items),
+            "untracked": len(untracked),
+            "watchlistedNotInSeerr": len(watchlisted_not_in_seerr),
+            "inSeerr": len(in_seerr),
+            "noTmdbId": no_tmdb_count,
+        },
+        "configured": {"radarr": radarr_ok, "sonarr": sonarr_ok},
+    }
+    await cache_set("library_untracked", result)
+    return result
 
 
 # ---------------------------------------------------------------------------

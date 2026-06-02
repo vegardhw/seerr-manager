@@ -6,6 +6,7 @@
   import RequestsTableView from './lib/RequestsTableView.svelte'
   import DetailDrawer from './lib/DetailDrawer.svelte'
   import WatchlistView from './lib/WatchlistView.svelte'
+  import LibraryView from './lib/LibraryView.svelte'
   import Toast from './lib/Toast.svelte'
 
   // ── Auth state ───────────────────────────────────────────────────────────
@@ -45,7 +46,7 @@
   }
 
   // ── Global view ─────────────────────────────────────────────────────────
-  let view = 'requests'   // 'requests' | 'watchlist'
+  let view = 'requests'   // 'requests' | 'watchlist' | 'library'
   let viewMode = 'grid'   // 'grid' | 'table'  — persisted per-view below
 
   // ── Requests state ──────────────────────────────────────────────────────
@@ -129,12 +130,19 @@
       watchlistReloadKey++
       return
     }
+    if (view === 'library') {
+      await api.clearCache().catch(() => {})
+      cacheInfo = null
+      libraryReloadKey++
+      return
+    }
     await api.clearCache().catch(() => {})
     cacheInfo = null
     await load()
   }
 
   let watchlistReloadKey = 0  // bump to force WatchlistView remount on manual refresh
+  let libraryReloadKey = 0    // bump to force LibraryView remount on manual refresh
 
   onMount(checkAuth)
 
@@ -385,10 +393,15 @@
           />
         {/if}
       {/if}
-    {:else}
+    {:else if view === 'watchlist'}
       <!-- key forces a fresh load when the user manually hits refresh on watchlist tab -->
       {#key watchlistReloadKey}
         <WatchlistView {toastRef} />
+      {/key}
+    {:else if view === 'library'}
+      <!-- key forces a fresh load when the user manually hits refresh on library tab -->
+      {#key libraryReloadKey}
+        <LibraryView {toastRef} />
       {/key}
     {/if}
   </main>
