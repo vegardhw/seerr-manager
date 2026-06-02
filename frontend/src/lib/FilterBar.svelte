@@ -1,7 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte'
 
-  export let view = 'requests'          // 'requests' | 'watchlist'
+  export let view = 'requests'          // 'requests' | 'watchlist' | 'library'
   export let filter = 'all'
   export let flaggedOnly = false
   export let mediaStatusFilter = 'all'
@@ -55,6 +55,13 @@
         on:click={() => dispatch('viewChange', 'watchlist')}
       >
         Watchlist
+      </button>
+      <button
+        class="ntab"
+        class:ntab--active={view === 'library'}
+        on:click={() => dispatch('viewChange', 'library')}
+      >
+        Library
       </button>
     </nav>
 

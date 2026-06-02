@@ -82,6 +82,9 @@ export const api = {
       body: JSON.stringify({ items }),
     }),
 
+  // ── Library view (Radarr + Sonarr) ──────────────────────────────────────
+  fetchLibraryUntracked: () => request('/api/library/untracked'),
+
   // ── Cache management ───────────────────────────────────────────────────────
   getCacheStatus: () => request('/api/cache/status'),
   clearCache: () => request('/api/cache', { method: 'DELETE' }),
